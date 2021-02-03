@@ -30,6 +30,45 @@ def add_url_size(df):
   df["url_size"] = df["cs(Referer)"].apply(lambda x: len(str(x)))
   return df
 
+def urlsize_superior_than(df, size):
+  df["url_size"] = df["cs(Referer)"].apply(lambda x: len(str(x))>=size)
+  return df
+
+def is_big_cs_bytes(df,size):
+  df["bigcs"] = df["cs-bytes"].apply(lambda x: int(x)>=size)
+  return df
+
+def preprocessing(df):
+  df.replace("-", "",inplace = True)
+  df = df[pd.to_numeric(df['cs-bytes'], errors='coerce').notnull()]
+  df = df[pd.to_numeric(df['sc-bytes'], errors='coerce').notnull()]
+
+  return df
+a = preprocessing(a)
+a = urlsize_superior_than(a,10)
+a = is_big_cs_bytes(a,10000)
+print(a.head(200))
+
+def amount_people_by(df, columnname):
+  columnname_by = str("people-by")+str(columnname)
+  df[columnname_by] =  df.groupby([columnname]).nunique()
+
+def add_amount_people_by(df, columnname):
+  columnname_by = str("people_by")+str(columnname)
+  df = df.drop_duplicates(subset=[columnname,"c-ip"])
+  df_frequency = df.groupby([columnname]).count()
+  most_frequent = df_frequency.index.tolist()
+  quantity = df_frequency.iloc[:,0].tolist()
+
+  frequent_host_dict = dict(zip(most_frequent, quantity))
+
+  df[columnname_by] = df[columnname].apply(lambda x: frequent_host_dict.get(x))
+  #print(df.head())
+  return df
+
+a = add_amount_people_by(a,"cs-host")
+print(a.head)
+
 def add_frequency(df, columnname):
   columnnamefreq = str(columnname)+str("-frequency")
   df_frequency = df.groupby([columnname]).count()
@@ -71,11 +110,14 @@ def compute_all_sims(data, y):
       data['final_sim'] = data['final_sim'] + data['sim']
 
 
+### adding the columns ###
+'''
 y=a.tail(1)
 a=make_dummies(a,'sc-filter-result')
 a = add_url_size(a)
 a = add_frequency(a,'cs-host')
 compute_all_sims(a,y)
+'''
 
 def normalization_zero_one(df, list_column):
   for column in list_column:
@@ -87,19 +129,28 @@ def normalization_gauss(df, list_column):
     df[column] = (df[column] - df[column].mean()) / df[column].std()
   return df
 
-
+### Normalizing ###
+'''
 only_values = a[['cs-bytes','sc-bytes','url_size','cs-host-frequency','sc-filter-result_DENIED','sc-filter-result_OBSERVED','sc-filter-result_PROXIED']]
-'''
-only_values = only_values.dropna()
-only_values = only_values.loc[only_values['cs-bytes'] == '-', 'cs-bytes'] = ""
-only_values = only_values.loc[only_values['sc-bytes'] == '-', 'sc-bytes'] = ""
-'''
-only_values['cs-bytes'].apply(lambda x: isinstance(x, (int, float)))
 
+#only_values = only_values.dropna()
+#only_values = only_values.loc[only_values['cs-bytes'] == '-', 'cs-bytes'] = ""
+#only_values = only_values.loc[only_values['sc-bytes'] == '-', 'sc-bytes'] = ""
+
+
+#only_values[pd.to_numeric(only_values['cs_bytes'], errors='coerce').notnull()]
+#only_values[pd.to_numeric(only_values['sc_bytes'], errors='coerce').notnull()]
 #only_values['cs-bytes'] = pd.to_numeric(only_values['cs-bytes'],errors='coerce').notnull()
 #only_values['sc-bytes'] = pd.to_numeric(only_values['sc-bytes'],errors='coerce').notnull()
+only_values = only_values[pd.to_numeric(only_values['cs-bytes'], errors='coerce').notnull()]
+only_values = only_values[pd.to_numeric(only_values['sc-bytes'], errors='coerce').notnull()]
+only_values = only_values.astype(float)
+
 normalization_zero_one(only_values,['cs-bytes','sc-bytes','url_size','cs-host-frequency'])
-print(only_values.dtypes)
+print(only_values.head())
+
+'''
+
 ####Getting the log that are sent periodically
 '''
 def time_interval(time1,time2):
