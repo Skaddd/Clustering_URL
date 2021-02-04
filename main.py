@@ -1,8 +1,7 @@
 
 import pandas as pd
 import  numpy as np
-
-
+from urllib.parse import urlparse
 import pandas as pd
 
 pd.set_option('display.width', 400)
@@ -23,12 +22,64 @@ a.head(25)
 #### IMPORT dataset ####
 headerString = 'date time time-taken c-ip cs-username cs-auth-group x-exception-id sc-filter-result cs-categories cs(Referer) sc-status s-action cs-method rs(Content-Type) cs-uri-scheme cs-host cs-uri-port cs-uri-path cs-uri-query cs-uri-extension cs(User-Agent) s-ip sc-bytes cs-bytes x-virus-id'
 header = headerString.split(" ")
-a = pd.read_csv('./Data/bigTest.txt', delimiter="\s+", index_col=False, encoding="utf-8", skiprows=[0, 1, 2, 3, 4, 5], names=header)
-
+data = pd.read_csv('./Data/bigTest.txt', delimiter="\s+", index_col=False, encoding="utf-8", skiprows=[0, 1, 2, 3, 4, 5], names=header)
+data=data.drop(columns=['cs-username','cs-auth-group','date','time-taken','cs-username','cs-auth-group','x-exception-id','sc-filter-result','cs-categories','s-action','rs(Content-Type)','cs(User-Agent)','s-ip','x-virus-id'])
 #### Adding statistics columns ####
+### FONCTIONS ###
+
+def preprocessing(df):
+  df.replace("-", "",inplace = True)
+  df = df[pd.to_numeric(df['cs-bytes'], errors='coerce').notnull()]
+  df = df[pd.to_numeric(df['sc-bytes'], errors='coerce').notnull()]
+  #df["cs(Referer)"] = df["cs(Referer)"].to_string()
+  return df
+
 def add_url_size(df):
   df["url_size"] = df["cs(Referer)"].apply(lambda x: len(str(x)))
   return df
+
+#Fonction qui regarde si le status fait référence à une erreur
+def strange_status(a):
+  #a['sc-status'] = a['sc-status'].astype(float)
+  a['sc-status'] = pd.to_numeric(a['sc-status'],errors='coerce')
+  a['strange_status'] = np.where(a['sc-status'] < 399, 0, 1)
+  return a
+
+#Fonction qui regarde si la méthode est comprise dans la liste des méthodes fréquentes
+def strange_method(a,tab_method):
+  a['strange_method'] = np.where(a['cs-method'].isin(tab_method), 0, 1)
+  return a
+
+#Fonction qui regarde si le port est compris dans la liste des ports fréquents
+def strange_port(a,tab_port):
+  a['strange_port'] = np.where(a['cs-uri-port'].isin(tab_port), 0, 1)
+  return a
+
+def find_same_referer(data):
+  data.loc[data['cs-host'] == data['referer-domain'], 'stayed'] = 1
+  data['stayed'] = data['stayed'].fillna(0)
+  return data
+
+def parse_url(data, column_toparse, scheme=True, domain=True, path=True, params=False, query=False, fragment=False):
+  if column_toparse not in data.columns:
+    print("Column name not found")
+    return 0
+  else:
+    try:
+      data['referer-protocol'], data['referer-domain'], data['referer-path'], data['referer-params'], data[
+        'referer-query'], data['referer-fragment'] = zip(*data[column_toparse].map(urlparse))
+      choices = [scheme, domain, path, params, query, fragment]
+      names = ['referer-protocol', 'referer-domain', 'referer-path', 'referer-params', 'referer-query',
+               'referer-fragment']
+      indexes = np.where(choices)[0]
+      keep = []
+      for k in indexes:
+        keep.append(names[k])
+      dropped = list(set(names) - set(keep))
+      data = data.drop(columns=dropped)
+    except:
+      pass
+  return data
 
 def urlsize_superior_than(df, size):
   df["url_size"] = df["cs(Referer)"].apply(lambda x: len(str(x))>=size)
@@ -38,16 +89,13 @@ def is_big_cs_bytes(df,size):
   df["bigcs"] = df["cs-bytes"].apply(lambda x: int(x)>=size)
   return df
 
-def preprocessing(df):
-  df.replace("-", "",inplace = True)
-  df = df[pd.to_numeric(df['cs-bytes'], errors='coerce').notnull()]
-  df = df[pd.to_numeric(df['sc-bytes'], errors='coerce').notnull()]
-
-  return df
-a = preprocessing(a)
-a = urlsize_superior_than(a,10)
-a = is_big_cs_bytes(a,10000)
-print(a.head(200))
+def remove_savelogs(data):
+  if 'cs-uri-path' not in data.columns:
+    print("wrong database")
+    return 0
+  else:
+    data = data.loc[(data['cs-uri-path'] == "/") & (data['cs-host'] == "") & (data['sc-status'] == 0)]
+  return data
 
 def amount_people_by(df, columnname):
   columnname_by = str("people-by")+str(columnname)
@@ -66,8 +114,25 @@ def add_amount_people_by(df, columnname):
   #print(df.head())
   return df
 
-a = add_amount_people_by(a,"cs-host")
-print(a.head)
+
+#### APPLYING THE FUNCTIONS TO GET NEW COLOMNS ####
+data = preprocessing(data)
+#data=parse_url(data,'cs(Referer)')
+#data = find_same_referer(data)
+data = urlsize_superior_than(data,10)
+data = is_big_cs_bytes(data,10000)
+data = strange_status(data)
+tab_method = ["GET","POST","HEAD","OPTIONS","PUT","CONNECT"]
+data = strange_method(data,tab_method)
+tab_port = [80,443,"80","443"]
+data = strange_port(data,tab_port)
+data = add_amount_people_by(data,"cs-host")
+print(data.head)
+
+
+
+#### OLD PART ####
+
 
 def add_frequency(df, columnname):
   columnnamefreq = str(columnname)+str("-frequency")
