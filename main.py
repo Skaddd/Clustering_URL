@@ -5,7 +5,7 @@ from urllib.parse import urlparse
 import pandas as pd
 
 pd.set_option('display.width', 400)
-pd.set_option('display.max_columns', 30)
+pd.set_option('display.max_columns', 40)
 pd.set_option('display.max_rows', 2000)
 #PARTIE UN PEU MOISIE
 '''
@@ -22,8 +22,8 @@ a.head(25)
 #### IMPORT dataset ####
 headerString = 'date time time-taken c-ip cs-username cs-auth-group x-exception-id sc-filter-result cs-categories cs(Referer) sc-status s-action cs-method rs(Content-Type) cs-uri-scheme cs-host cs-uri-port cs-uri-path cs-uri-query cs-uri-extension cs(User-Agent) s-ip sc-bytes cs-bytes x-virus-id'
 header = headerString.split(" ")
-data = pd.read_csv('./Data/bigTest.txt', delimiter="\s+", index_col=False, encoding="utf-8", skiprows=[0, 1, 2, 3, 4, 5], names=header)
-data=data.drop(columns=['cs-username','cs-auth-group','date','time-taken','cs-username','cs-auth-group','x-exception-id','sc-filter-result','cs-categories','s-action','rs(Content-Type)','cs(User-Agent)','s-ip','x-virus-id'])
+data = pd.read_csv('./Data/bigTest.txt', delimiter="\s+", index_col=False, encoding="utf-8", comment= "#", names=header)
+#data=data.drop(columns=['cs-username','cs-auth-group','date','time-taken','cs-username','cs-auth-group','x-exception-id','sc-filter-result','cs-categories','s-action','rs(Content-Type)','cs(User-Agent)','s-ip','x-virus-id'])
 #### Adding statistics columns ####
 ### FONCTIONS ###
 
@@ -56,8 +56,8 @@ def strange_port(a,tab_port):
   return a
 
 def find_same_referer(data):
-  data.loc[data['cs-host'] == data['referer-domain'], 'stayed'] = 1
-  data['stayed'] = data['stayed'].fillna(0)
+  data.loc[data['cs-host'] != data['referer-domain'], 'changed'] = 1
+  data['changed'] = data['changed'].fillna(0)
   return data
 
 def parse_url(data, column_toparse, scheme=True, domain=True, path=True, params=False, query=False, fragment=False):
@@ -81,12 +81,17 @@ def parse_url(data, column_toparse, scheme=True, domain=True, path=True, params=
       pass
   return data
 
-def urlsize_superior_than(df, size):
-  df["url_size"] = df["cs(Referer)"].apply(lambda x: len(str(x))>=size)
+def urlsize_superior_than(df, quantile = 0.9):
+
+  df["url_size"] = df["cs(Referer)"].apply(lambda x: len(str(x)))
+  value = df["url_size"].quantile(quantile)
+  df["url_size"] = df["url_size"].apply(lambda x: x >= value)
   return df
 
-def is_big_cs_bytes(df,size):
-  df["bigcs"] = df["cs-bytes"].apply(lambda x: int(x)>=size)
+def is_big_cs_bytes(df, quantile = 0.9):
+  df["bigcs"] = df["cs-bytes"].apply(lambda x: int(x))
+  value = df["bigcs"].quantile(quantile)
+  df["bigcs"] = df["bigcs"].apply(lambda x: x >= value)
   return df
 
 def remove_savelogs(data):
@@ -97,11 +102,20 @@ def remove_savelogs(data):
     data = data.loc[(data['cs-uri-path'] == "/") & (data['cs-host'] == "") & (data['sc-status'] == 0)]
   return data
 
+def extension_superior_than(df, size, quantile, tab_extension):
+  value = df["cs-uri-extension-frequency"].quantile(quantile)
+
+  df["extension_strange"] = np.where(df["cs-uri-extension-frequency"] > value, 0, 1)
+  df['len-extension']=df['cs-uri-extension'].apply(lambda x  : len(str(x)))
+  df.loc[df['len-extension']>size,"extension_strange"]=1
+  df.loc[df['cs-uri-extension'].isin(tab_extension),"extension_strange"]=1
+  return df
+
 def amount_people_by(df, columnname):
   columnname_by = str("people-by")+str(columnname)
   df[columnname_by] =  df.groupby([columnname]).nunique()
 
-def add_amount_people_by(df, columnname):
+def add_amount_people_by(df, columnname,quantile=0.9):
   columnname_by = str("people_by")+str(columnname)
   df = df.drop_duplicates(subset=[columnname,"c-ip"])
   df_frequency = df.groupby([columnname]).count()
@@ -111,28 +125,11 @@ def add_amount_people_by(df, columnname):
   frequent_host_dict = dict(zip(most_frequent, quantity))
 
   df[columnname_by] = df[columnname].apply(lambda x: frequent_host_dict.get(x))
+  value = df[columnname_by].quantile(quantile)
+  df[columnname_by] = df[columnname_by].apply(lambda x: x >= value)
+
   #print(df.head())
   return df
-
-
-#### APPLYING THE FUNCTIONS TO GET NEW COLOMNS ####
-data = preprocessing(data)
-#data=parse_url(data,'cs(Referer)')
-#data = find_same_referer(data)
-data = urlsize_superior_than(data,10)
-data = is_big_cs_bytes(data,10000)
-data = strange_status(data)
-tab_method = ["GET","POST","HEAD","OPTIONS","PUT","CONNECT"]
-data = strange_method(data,tab_method)
-tab_port = [80,443,"80","443"]
-data = strange_port(data,tab_port)
-data = add_amount_people_by(data,"cs-host")
-print(data.head)
-
-
-
-#### OLD PART ####
-
 
 def add_frequency(df, columnname):
   columnnamefreq = str(columnname)+str("-frequency")
@@ -145,6 +142,29 @@ def add_frequency(df, columnname):
   #print(df.head())
   return df
 
+
+#### APPLYING THE FUNCTIONS TO GET NEW COLOMNS ####
+data = preprocessing(data)
+data=parse_url(data,'cs(Referer)')
+data = find_same_referer(data)
+data = urlsize_superior_than(data)
+data = is_big_cs_bytes(data)
+data = strange_status(data)
+daat = remove_savelogs(data)
+tab_method = ["GET","POST","HEAD","OPTIONS","PUT","CONNECT"]
+data = strange_method(data,tab_method)
+tab_port = [80,443,"80","443"]
+data = strange_port(data,tab_port)
+data = add_amount_people_by(data,"cs-host")
+data = add_frequency(data, "cs-uri-extension")
+tab_extension = ["dll","zip","rar","bin","exe"]
+data = extension_superior_than(data, 20,0.004,tab_extension)
+score_cols = ['url_size', 'bigcs', 'strange_status', 'strange_method', 'strange_port', 'people_bycs-host', 'changed']
+data["sum"] = data[score_cols].sum(axis=1)
+data = data.sort_values(by=["sum"],ascending=False)
+print(data.head(200))
+
+#### OLD PART ####
 def make_dummies(df, string):
   df = pd.concat([df, pd.get_dummies(df[string], prefix=string)], axis=1)
   df.drop([string], axis=1, inplace=True)
