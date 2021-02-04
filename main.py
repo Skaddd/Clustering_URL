@@ -4,7 +4,7 @@ import  numpy as np
 from urllib.parse import urlparse
 import pandas as pd
 
-pd.set_option('display.width', 400)
+pd.set_option('display.width', 40000)
 pd.set_option('display.max_columns', 40)
 pd.set_option('display.max_rows', 2000)
 #PARTIE UN PEU MOISIE
@@ -17,13 +17,13 @@ print(a.iloc[2])
 a.head(25)
 '''
 
-
 #### Partie sur le .log copié ####
 #### IMPORT dataset ####
 headerString = 'date time time-taken c-ip cs-username cs-auth-group x-exception-id sc-filter-result cs-categories cs(Referer) sc-status s-action cs-method rs(Content-Type) cs-uri-scheme cs-host cs-uri-port cs-uri-path cs-uri-query cs-uri-extension cs(User-Agent) s-ip sc-bytes cs-bytes x-virus-id'
 header = headerString.split(" ")
 data = pd.read_csv('./Data/bigTest.txt', delimiter="\s+", index_col=False, encoding="utf-8", comment= "#", names=header)
-#data=data.drop(columns=['cs-username','cs-auth-group','date','time-taken','cs-username','cs-auth-group','x-exception-id','sc-filter-result','cs-categories','s-action','rs(Content-Type)','cs(User-Agent)','s-ip','x-virus-id'])
+data=data.drop(columns=['cs-username','cs-auth-group','date','time-taken','x-virus-id'])
+data = data.sample(frac=0.1)
 #### Adding statistics columns ####
 ### FONCTIONS ###
 
@@ -81,17 +81,19 @@ def parse_url(data, column_toparse, scheme=True, domain=True, path=True, params=
       pass
   return data
 
-def urlsize_superior_than(df, quantile = 0.9):
+def urlsize_superior_than(df, quantile1 = 0.95,quantile2 = 0.99,poids = 2):
 
   df["url_size"] = df["cs(Referer)"].apply(lambda x: len(str(x)))
-  value = df["url_size"].quantile(quantile)
-  df["url_size"] = df["url_size"].apply(lambda x: x >= value)
+  value1 = df["url_size"].quantile(quantile1)
+  value2 = df["url_size"].quantile(quantile2)
+  df["url_size"] = df["url_size"].apply(lambda x: max(0,min(poids,poids*((x-value1)/(value2-value1)))))
   return df
 
-def is_big_cs_bytes(df, quantile = 0.9):
+def is_big_cs_bytes(df, quantile1 = 0.95,quantile2 = 0.99,poids = 2):
   df["bigcs"] = df["cs-bytes"].apply(lambda x: int(x))
-  value = df["bigcs"].quantile(quantile)
-  df["bigcs"] = df["bigcs"].apply(lambda x: x >= value)
+  value1 = df["bigcs"].quantile(quantile1)
+  value2 = df["bigcs"].quantile(quantile2)
+  df["bigcs"] = df["bigcs"].apply(lambda x: max(0,min(poids,poids*((x-value1)/(value2-value1)))))
   return df
 
 def remove_savelogs(data):
@@ -99,7 +101,7 @@ def remove_savelogs(data):
     print("wrong database")
     return 0
   else:
-    data = data.loc[(data['cs-uri-path'] == "/") & (data['cs-host'] == "") & (data['sc-status'] == 0)]
+    data = data.loc[(data['cs-uri-path'] != "/") | (data['cs-host'] != "") | (data['sc-status'] != 0)]
   return data
 
 def extension_superior_than(df, size, quantile, tab_extension):
@@ -108,25 +110,29 @@ def extension_superior_than(df, size, quantile, tab_extension):
   df["extension_strange"] = np.where(df["cs-uri-extension-frequency"] > value, 0, 1)
   df['len-extension']=df['cs-uri-extension'].apply(lambda x  : len(str(x)))
   df.loc[df['len-extension']>size,"extension_strange"]=1
-  df.loc[df['cs-uri-extension'].isin(tab_extension),"extension_strange"]=1
+  df.loc[df['cs-uri-extension'].isin(tab_extension),"extension_strange"]=0.5
+  df["extension_strange"] = df["extension_strange"]*2
   return df
 
 def amount_people_by(df, columnname):
   columnname_by = str("people-by")+str(columnname)
   df[columnname_by] =  df.groupby([columnname]).nunique()
 
-def add_amount_people_by(df, columnname,quantile=0.9):
+def add_amount_people_by(df, columnname, quantile1=0.5, quantile2 = 0.99, poids = 3):
   columnname_by = str("people_by")+str(columnname)
-  df = df.drop_duplicates(subset=[columnname,"c-ip"])
-  df_frequency = df.groupby([columnname]).count()
+  df2 = df.drop_duplicates(subset=[columnname,"c-ip"])
+  df_frequency = df2.groupby([columnname]).count()
   most_frequent = df_frequency.index.tolist()
   quantity = df_frequency.iloc[:,0].tolist()
 
   frequent_host_dict = dict(zip(most_frequent, quantity))
 
   df[columnname_by] = df[columnname].apply(lambda x: frequent_host_dict.get(x))
-  value = df[columnname_by].quantile(quantile)
-  df[columnname_by] = df[columnname_by].apply(lambda x: x >= value)
+  value1 = df[columnname_by].quantile(quantile1)
+  value2 = df[columnname_by].quantile(quantile2)
+  print(value1)
+  print(value2)
+  df[columnname_by] = df[columnname_by].apply(lambda x: - max(0,min(poids,poids*((x-value1)/(value2-value1)))))
 
   #print(df.head())
   return df
@@ -150,20 +156,118 @@ data = find_same_referer(data)
 data = urlsize_superior_than(data)
 data = is_big_cs_bytes(data)
 data = strange_status(data)
-daat = remove_savelogs(data)
-tab_method = ["GET","POST","HEAD","OPTIONS","PUT","CONNECT"]
+data = remove_savelogs(data)
+tab_method = ["GET","POST","HEAD","OPTIONS","PUT","CONNECT",""]
 data = strange_method(data,tab_method)
-tab_port = [80,443,"80","443"]
+tab_port = [80,443,"80","443",""]
 data = strange_port(data,tab_port)
 data = add_amount_people_by(data,"cs-host")
 data = add_frequency(data, "cs-uri-extension")
 tab_extension = ["dll","zip","rar","bin","exe"]
 data = extension_superior_than(data, 20,0.004,tab_extension)
-score_cols = ['url_size', 'bigcs', 'strange_status', 'strange_method', 'strange_port', 'people_bycs-host', 'changed']
+score_cols = ['url_size', 'bigcs', 'strange_status', 'strange_method', 'strange_port', 'people_bycs-host', 'changed','extension_strange']
 data["sum"] = data[score_cols].sum(axis=1)
 data = data.sort_values(by=["sum"],ascending=False)
+
 print(data.head(200))
 
+from sklearn.cluster import KMeans
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+
+amount_clusters = 8
+kmeans = KMeans(n_clusters=amount_clusters, random_state=0).fit(data[score_cols])
+print(kmeans.labels_)
+print(kmeans.cluster_centers_)
+data["final_cluster"] = kmeans.labels_
+data["final_cluster"] = data["final_cluster"].astype("category")
+print(data.dtypes)
+
+
+
+from sklearn.decomposition import PCA
+
+pca = PCA(n_components=2).fit(data[score_cols])
+datapoint = pca.transform(data[score_cols])
+plt.scatter(datapoint[:, 0], datapoint[:, 1])
+plt.show()
+x = [datapoint[:, 0]]
+y = [datapoint[:, 1]]
+
+
+colors = cm.rainbow(np.linspace(0, 1, amount_clusters))
+print(colors)
+pca = PCA(n_components=2).fit(data[score_cols])
+for i in range(amount_clusters):
+  subframe = data[data['final_cluster'] == i]
+
+  datapoint = pca.transform(subframe[score_cols])
+  x = [datapoint[:, 0]]
+  y = [datapoint[:, 1]]
+  plt.scatter(x, y, color=colors[i], s=20)
+plt.show()
+
+# plot parallel coordinates
+from pandas.plotting import parallel_coordinates
+score_cols = ['url_size', 'bigcs', 'strange_status', 'strange_method', 'strange_port', 'people_bycs-host', 'changed','extension_strange','final_cluster']
+
+pd.plotting.parallel_coordinates(data[score_cols], 'final_cluster')
+
+plt.show()
+for i in range(amount_clusters):
+  subframe = data[data['final_cluster'] == i]
+
+
+  pd.plotting.parallel_coordinates(
+
+    subframe[score_cols], 'final_cluster', color=('#556270', '#4ECDC4', '#C7F464')
+
+  )
+  plt.show()
+
+'''
+score_cols = ['url_size', 'bigcs', 'strange_status', 'strange_method', 'strange_port', 'people_bycs-host']
+
+pd.plotting.parallel_coordinates(
+
+    data, 'final_cluster', color=('#556270', '#4ECDC4', '#C7F464')
+
+)
+'''
+"""
+for i in range(amount_clusters) :
+  subframe = data[data['final_cluster'] == i]
+
+  score_cols = ['url_size', 'bigcs', 'strange_status', 'strange_method', 'strange_port', 'people_bycs-host', 'changed',
+                'extension_strange', 'sum']
+
+  parallel_coordinates(subframe[score_cols], 'sum')
+"""
+"""
+import matplotlib.pyplot as plt
+import seaborn as sns
+f, ax = plt.subplots(figsize=(10, 6))
+corr = data[score_cols].corr()
+hm = sns.heatmap(round(corr,2), annot=True, ax=ax, cmap="coolwarm",fmt='.2f',
+                 linewidths=.05)
+f.subplots_adjust(top=0.93)
+t= f.suptitle('Attributes Correlation Heatmap', fontsize=14)
+#plt.show()
+
+# Scaling attribute values to avoid few outiers
+
+
+from sklearn.preprocessing import StandardScaler
+ss = StandardScaler()
+
+score_cols = ['url_size', 'bigcs', 'strange_status', 'strange_method', 'strange_port', 'people_bycs-host', 'changed','extension_strange','sum']
+
+
+# plot parallel coordinates
+from pandas.plotting import parallel_coordinates
+parallel_coordinates(data[score_cols], 'sum')
+plt.show()
+"""
 #### OLD PART ####
 def make_dummies(df, string):
   df = pd.concat([df, pd.get_dummies(df[string], prefix=string)], axis=1)
