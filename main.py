@@ -13,9 +13,9 @@ pd.set_option('display.max_rows', 2000)
 #### IMPORT dataset ####
 headerString = 'date time time-taken c-ip cs-username cs-auth-group x-exception-id sc-filter-result cs-categories cs(Referer) sc-status s-action cs-method rs(Content-Type) cs-uri-scheme cs-host cs-uri-port cs-uri-path cs-uri-query cs-uri-extension cs(User-Agent) s-ip sc-bytes cs-bytes x-virus-id'
 header = headerString.split(" ")
-data = pd.read_csv('./Data/bigTest.txt', delimiter="\s+", index_col=False, encoding="utf-8", comment= "#", names=header)
+data = pd.read_csv('./Data/BitTest2.txt', delimiter="\s+", index_col=False, encoding="utf-8", comment= "#", names=header)
 data=data.drop(columns=['cs-username','cs-auth-group','date','time-taken','x-virus-id'])
-data = data.sample(frac=0.1)
+data = data.sample(frac=0.01)
 
 #### Preprocessing tools and removal of useless logs ####
 
@@ -44,9 +44,13 @@ def remove_rows(data):
   data = data.drop(columns=['empty', 'x-exception-id'])
   return data
 
+print(len(data))
 data = preprocessing(data)
+
+print(len(data))
 data = remove_rows(data)
 
+print(len(data))
 #### Adding statistics columns ####
 ### FONCTIONS ###
 
@@ -59,7 +63,7 @@ def strange_status(a):
 
 #Fonction qui regarde si le port est compris dans la liste des ports fréquents
 def strange_port(data, tab_port, tab_method):
-  data['strange_port'] = np.where(data['cs-uri-port'].isin(tab_port), 0, 1)
+  data['strange_port'] = np.where(data['cs-uri-port'].isin(tab_port), 0, 8)
   data.loc[(data['cs-method'].isin(tab_method)) & (data['strange_port'] == 1), 'strange_port'] += 1
 
   return data
@@ -163,25 +167,34 @@ def compute_useragent(data, poids):
 
 data = strange_status(data)
 
+print(len(data))
 tab_method = ["GET","POST","HEAD","OPTIONS","PUT","CONNECT",""]
 tab_port = [80,443,"80","443",""]
 data = strange_port(data,tab_port,tab_method)
 
+print(len(data))
 data=parse_url(data,'cs(Referer)')
 
+print(len(data))
 data = find_same_referer(data)
 
+print(len(data))
 data=compute_url_size(data,2)
 
+print(len(data))
 data = is_big_cs_bytes(data)
 
+print(len(data))
 data = add_amount_people_by(data,"cs-host")
 
+print(len(data))
 data = add_frequency(data, "cs-uri-extension")
 
+print(len(data))
 tab_extension = ["dll","zip","rar","bin","exe"]
 data = extension_superior_than(data, 20,0.004,tab_extension)
 
+print(len(data))
 data=compute_useragent(data,1)
 
 score_cols = ['url_size', 'bigcs', 'strange_status', 'strange_port', 'people_bycs-host', 'changed','extension_strange', 'fishy_os', 'fishy_browser']
@@ -191,17 +204,29 @@ data = data.sort_values(by=["sum"],ascending=False)
 
 print(data.head(200))
 
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+f, ax = plt.subplots(figsize=(10, 6))
+corr = data[score_cols].corr()
+hm = sns.heatmap(round(corr,2), annot=True, ax=ax, cmap="coolwarm",fmt='.2f',
+                 linewidths=.05)
+f.subplots_adjust(top=0.93)
+t= f.suptitle('Attributes Correlation Heatmap', fontsize=14)
+plt.show()
+
 from sklearn.cluster import KMeans
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 
-amount_clusters = 8
+amount_clusters = 3
 kmeans = KMeans(n_clusters=amount_clusters, random_state=0).fit(data[score_cols])
 print(kmeans.labels_)
 print(kmeans.cluster_centers_)
 data["final_cluster"] = kmeans.labels_
 data["final_cluster"] = data["final_cluster"].astype("category")
 print(data.dtypes)
+
 
 
 
@@ -227,9 +252,37 @@ for i in range(amount_clusters):
   plt.scatter(x, y, color=colors[i], s=20)
 plt.show()
 
+
+fig, axs = plt.subplots(3, 3)
+
+for i in range(2,12):
+  amount_clusters = i
+  kmeans = KMeans(n_clusters=amount_clusters, random_state=0).fit(data[score_cols])
+  data["final_cluster"] = kmeans.labels_
+  data["final_cluster"] = data["final_cluster"].astype("category")
+  colors = cm.rainbow(np.linspace(0, 1, amount_clusters))
+  for i in range(amount_clusters):
+    subframe = data[data['final_cluster'] == i]
+
+    datapoint = pca.transform(subframe[score_cols])
+    x = [datapoint[:, 0]]
+    y = [datapoint[:, 1]]
+    axs[(i-2)//3, (i-2)%3].scatter(x, y, color=colors[i], s=20)
+    cop = amount_clusters
+
+plt.show()
+
+
+
+
 # plot parallel coordinates
 from pandas.plotting import parallel_coordinates
-score_cols = ['url_size', 'bigcs', 'strange_status', 'strange_method', 'strange_port', 'people_bycs-host', 'changed','extension_strange','final_cluster']
+
+amount_clusters = 10
+kmeans = KMeans(n_clusters=amount_clusters, random_state=0).fit(data[score_cols])
+data["final_cluster"] = kmeans.labels_
+data["final_cluster"] = data["final_cluster"].astype("category")
+score_cols = ['url_size', 'bigcs', 'strange_status', 'strange_port', 'people_bycs-host', 'changed','extension_strange', 'fishy_os', 'fishy_browser','final_cluster']
 
 pd.plotting.parallel_coordinates(data[score_cols], 'final_cluster')
 
@@ -245,190 +298,4 @@ for i in range(amount_clusters):
   )
   plt.show()
 
-'''
-score_cols = ['url_size', 'bigcs', 'strange_status', 'strange_method', 'strange_port', 'people_bycs-host']
 
-pd.plotting.parallel_coordinates(
-
-    data, 'final_cluster', color=('#556270', '#4ECDC4', '#C7F464')
-
-)
-'''
-"""
-for i in range(amount_clusters) :
-  subframe = data[data['final_cluster'] == i]
-
-  score_cols = ['url_size', 'bigcs', 'strange_status', 'strange_method', 'strange_port', 'people_bycs-host', 'changed',
-                'extension_strange', 'sum']
-
-  parallel_coordinates(subframe[score_cols], 'sum')
-"""
-"""
-import matplotlib.pyplot as plt
-import seaborn as sns
-f, ax = plt.subplots(figsize=(10, 6))
-corr = data[score_cols].corr()
-hm = sns.heatmap(round(corr,2), annot=True, ax=ax, cmap="coolwarm",fmt='.2f',
-                 linewidths=.05)
-f.subplots_adjust(top=0.93)
-t= f.suptitle('Attributes Correlation Heatmap', fontsize=14)
-#plt.show()
-
-# Scaling attribute values to avoid few outiers
-
-
-from sklearn.preprocessing import StandardScaler
-ss = StandardScaler()
-
-score_cols = ['url_size', 'bigcs', 'strange_status', 'strange_method', 'strange_port', 'people_bycs-host', 'changed','extension_strange','sum']
-
-
-# plot parallel coordinates
-from pandas.plotting import parallel_coordinates
-parallel_coordinates(data[score_cols], 'sum')
-plt.show()
-"""
-#### OLD PART ####
-def make_dummies(df, string):
-  df = pd.concat([df, pd.get_dummies(df[string], prefix=string)], axis=1)
-  df.drop([string], axis=1, inplace=True)
-  return df
-
-def compute_similarity(string1, stand_val):
-  indexes = np.where(string1 == stand_val)
-  return indexes[0]
-
-def apply_sim(data, column_name, one_line_df, new_col_name):
-  if column_name not in data.columns:
-    print("Wrong column name")
-    return 0
-  else:
-    list_indexes = compute_similarity(data[column_name].values, one_line_df[column_name].values[0])
-    data[new_col_name] = data.index.isin(list_indexes)
-    data[new_col_name] = data[new_col_name].astype(int)
-  return data
-
-def compute_all_sims(data, y):
-  all_cols = ['x-exception-id', 'cs-categories',
-              'sc-status', 's-action', 'cs-uri-scheme', 'cs-uri-port']
-  for col in all_cols:
-    apply_sim(data, col, y, 'sim')
-    if 'final_sim' not in data.columns:
-      data['final_sim'] = data['sim']
-    else:
-      data['final_sim'] = data['final_sim'] + data['sim']
-
-
-### adding the columns ###
-'''
-y=a.tail(1)
-a=make_dummies(a,'sc-filter-result')
-a = add_url_size(a)
-a = add_frequency(a,'cs-host')
-compute_all_sims(a,y)
-'''
-
-def normalization_zero_one(df, list_column):
-  for column in list_column:
-    df[column] = (df[column] - df[column].min()) / (df[column].max() - df[column].min())
-  return df
-
-def normalization_gauss(df, list_column):
-  for column in list_column:
-    df[column] = (df[column] - df[column].mean()) / df[column].std()
-  return df
-
-### Normalizing ###
-'''
-only_values = a[['cs-bytes','sc-bytes','url_size','cs-host-frequency','sc-filter-result_DENIED','sc-filter-result_OBSERVED','sc-filter-result_PROXIED']]
-
-#only_values = only_values.dropna()
-#only_values = only_values.loc[only_values['cs-bytes'] == '-', 'cs-bytes'] = ""
-#only_values = only_values.loc[only_values['sc-bytes'] == '-', 'sc-bytes'] = ""
-
-
-#only_values[pd.to_numeric(only_values['cs_bytes'], errors='coerce').notnull()]
-#only_values[pd.to_numeric(only_values['sc_bytes'], errors='coerce').notnull()]
-#only_values['cs-bytes'] = pd.to_numeric(only_values['cs-bytes'],errors='coerce').notnull()
-#only_values['sc-bytes'] = pd.to_numeric(only_values['sc-bytes'],errors='coerce').notnull()
-only_values = only_values[pd.to_numeric(only_values['cs-bytes'], errors='coerce').notnull()]
-only_values = only_values[pd.to_numeric(only_values['sc-bytes'], errors='coerce').notnull()]
-only_values = only_values.astype(float)
-
-normalization_zero_one(only_values,['cs-bytes','sc-bytes','url_size','cs-host-frequency'])
-print(only_values.head())
-
-'''
-
-####Getting the log that are sent periodically
-'''
-def time_interval(time1,time2):
-  t1 = sum(x * int(t) for x, t in zip([3600, 60, 1], time1.split(":")))
-  t2 = sum(x * int(t) for x, t in zip([3600, 60, 1], time2.split(":")))
-  return abs(t1-t2)
-
-lasttime = "14:45:02"
-lasturl = ""
-streak = 0
-for index, row in b.iterrows():
-    if lasturl == row["cs(Referer)"]:
-        if time_interval(lasttime,row["time"])>=3:
-            streak+=1
-            if streak>= 5:
-                print(lasturl)
-    else:
-        streak = 0
-        lasturl = row["cs(Referer)"]
-    lasttime = row["time"]
-#the x-exception-id
-#print(a['x-exception-id'].unique())
-'''
-#### Some random stats to get to know the dataset ####
-
-#The max amount of log from the same user to get a better understanding
-#print(a["c-ip"].mode())
-#b = a.sort_values(by=['c-ip', 'cs(Referer)'])
-#print(b.head(200))
-
-#c = b[b["c-ip"]=="195e047d75339fd1"]
-#print(c.head(2000))
-
-
-'''
-['-' 'internal_error' 'invalid_request' 'policy_denied' 'tcp_error'
- 'unsupported_protocol' 'dns_unresolved_hostname' 'dns_server_failure'
- 'invalid_response' nan 'cs-auth-group']
-'''
-
-#the different sc-status
-#print(a['sc-status'].unique())
-
-'''
-[302 200 304 301 404 403 400 0 206 503 500 204 509 410 406 401 307 303 100
- 408 501 508 504 502 405 411 300 201 '200' '400' '403' '206' '304' '0'
- '404' '302' '204' '301' '500' '401' '503' '406' '100' nan 'cs(Referer)']
-
-Information sur le sc status:
-https://docs.microsoft.com/fr-fr/troubleshoot/iis/http-status-code
-1 xx - Informations
-2 xx - Réussite
-3 xx - Redirection
-4 xx - Erreur du client
--400 - Demande non bonne
--401 - Accès refusé.
--403 - Interdit.
--404 - In trouvé.
-5 xx - Erreur de serveur
-'''
-
-#the different s-actions
-#print(a["s-action"].unique())
-
-"""
-['TCP_NC_MISS' 'TCP_HIT' 'TCP_MISS' 'TCP_ERR_MISS' 'TCP_REFRESH_MISS'
- 'TCP_DENIED' 'TCP_TUNNELED' 'TCP_PARTIAL_MISS' 'TCP_CLIENT_REFRESH'
- 'TCP_NC_MISS_RST' '-' 'TCP_MISS_RST' 'TCP_AUTH_HIT' 'TCP_AUTH_MISS' nan
- 'sc-status']
-"""
-
-#print(a['cs-method'].unique())
